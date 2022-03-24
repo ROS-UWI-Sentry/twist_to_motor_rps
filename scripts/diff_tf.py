@@ -76,17 +76,12 @@ class DiffTf:
         
         #### parameters #######
         self.rate = rospy.get_param('~rate',10.0)  # the rate at which to publish the transform
-        self.ticks_meter = float(rospy.get_param('ticks_meter', 50))  # The number of wheel encoder ticks per meter of travel
         self.base_width = float(rospy.get_param('~base_width', 0.35)) # The wheel base width in meters
         
         self.base_frame_id = rospy.get_param('~base_frame_id','base_link') # the name of the base frame of the robot
-        self.odom_frame_id = rospy.get_param('~odom_frame_id', 'odom') # the name of the odometry reference frame
+        self.odom_frame_id = rospy.get_param('~odom_frame_id', 'odom_wheels') # the name of the odometry reference frame
         
-        self.encoder_min = rospy.get_param('encoder_min', -32768)
-        self.encoder_max = rospy.get_param('encoder_max', 32768)
-        self.encoder_low_wrap = rospy.get_param('wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min )
-        self.encoder_high_wrap = rospy.get_param('wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min )
- 
+
         self.t_delta = rospy.Duration(1.0/self.rate)
         self.t_next = rospy.Time.now() + self.t_delta
         
@@ -106,13 +101,13 @@ class DiffTf:
         self.dr = 0
         self.then = rospy.Time.now()
         self.encl = 0	            #encoder left velocity        
-  	self.encr = 0	            #encoder right velocity
+        self.encr = 0	            #encoder right velocity
 
         # subscriptions
         rospy.Subscriber("encoder_rps", Num, self.encoderCallback)
         #rospy.Subscriber("lwheel", Int16, self.lwheelCallback)
         #rospy.Subscriber("rwheel", Int16, self.rwheelCallback)
-        self.odomPub = rospy.Publisher("odom", Odometry, queue_size=10)
+        self.odomPub = rospy.Publisher("odom_wheels", Odometry, queue_size=10)
         self.odomBroadcaster = TransformBroadcaster()
         
     #############################################################################
@@ -132,18 +127,20 @@ class DiffTf:
             elapsed = now - self.then
             self.then = now
             elapsed = elapsed.to_sec()
-            
+            #print(elapsed)
             # calculate odometry
 
-	    #encoder messages are in revolutions per second(rps):
-	    #convert to meters per second:
-	    #rps*pi*diameter
-     	    enc_vel_l=self.encl*3.14*0.215
-            enc_vel_r=self.encr*3.14*0.215
-	    #distance traveled for left wheel (velocity/time):
-	    d_left = enc_vel_l/elapsed
-	    #distance traveled for right wheel:
-	    d_right = enc_vel_r/elapsed
+            #encoder messages are in revolutions per second(rps):
+            #convert to meters per second:
+            #rps*pi*diameter
+            enc_vel_l=self.encl*pi*0.215
+            enc_vel_r=self.encr*pi*0.215
+            #distance traveled for left wheel (velocity*time):
+            d_left = enc_vel_l * elapsed
+            #print(d_left)
+            #distance traveled for right wheel:
+            d_right = enc_vel_r * elapsed
+            #print(d_right)
             # distance traveled is the average of the two wheels 
             d = ( d_left + d_right ) / 2
             # this approximation works (in radians) for small angles
@@ -151,8 +148,8 @@ class DiffTf:
             # calculate velocities
             self.dx = d / elapsed
             self.dr = th / elapsed
-            
-             
+
+                
             if (d != 0):
                 # calculate distance traveled in x and y
                 x = cos( th ) * d
@@ -169,14 +166,14 @@ class DiffTf:
             quaternion.y = 0.0
             quaternion.z = sin( self.th / 2 )
             quaternion.w = cos( self.th / 2 )
-            self.odomBroadcaster.sendTransform(
+            '''self.odomBroadcaster.sendTransform(
                 (self.x, self.y, 0),
                 (quaternion.x, quaternion.y, quaternion.z, quaternion.w),
                 rospy.Time.now(),
                 self.base_frame_id,
                 self.odom_frame_id
-                )
-            
+                )'''
+
             odom = Odometry()
             odom.header.stamp = now
             odom.header.frame_id = self.odom_frame_id
@@ -188,41 +185,15 @@ class DiffTf:
             odom.twist.twist.linear.x = self.dx
             odom.twist.twist.linear.y = 0
             odom.twist.twist.angular.z = self.dr
+            odom.pose.covariance = [0.001, 0,0,0,0,0,0,0.001,0,0,0,0,0,0,0.001,0,0,0,0,0,0,0.001,0,0,0,0,0,0,0.001,0,0,0,0,0,0,0.001]
             self.odomPub.publish(odom)
-            
-            
 
-
-    #############################################################################
-    def lwheelCallback(self, msg):
-    #############################################################################
-        enc = msg.data
-        if (enc < self.encoder_low_wrap and self.prev_lencoder > self.encoder_high_wrap):
-            self.lmult = self.lmult + 1
-            
-        if (enc > self.encoder_high_wrap and self.prev_lencoder < self.encoder_low_wrap):
-            self.lmult = self.lmult - 1
-            
-        self.left = 1.0 * (enc + self.lmult * (self.encoder_max - self.encoder_min)) 
-        self.prev_lencoder = enc
-        
-    #############################################################################
-    def rwheelCallback(self, msg):
-    #############################################################################
-        enc = msg.data
-        if(enc < self.encoder_low_wrap and self.prev_rencoder > self.encoder_high_wrap):
-            self.rmult = self.rmult + 1
-        
-        if(enc > self.encoder_high_wrap and self.prev_rencoder < self.encoder_low_wrap):
-            self.rmult = self.rmult - 1
-            
-        self.right = 1.0 * (enc + self.rmult * (self.encoder_max - self.encoder_min))
-        self.prev_rencoder = enc
+ 
      #################################
     def encoderCallback(self, msg):
      ################################
-        self.ecnl = msg.num[0]
-	self.encr = msg.num[1]
+        self.encl = msg.num[0]
+        self.encr = msg.num[1]
 
 #############################################################################
 #############################################################################
